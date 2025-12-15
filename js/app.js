@@ -372,7 +372,18 @@ window.editIssue = async function(id) {
         document.getElementById('issueCategory').value = issue.category;
         document.getElementById('issueAssignee').value = issue.assignee || '';
         document.getElementById('issuePageUrl').value = issue.page_url || '';
-        document.getElementById('issueDueDate').value = issue.due_date || '';
+        
+        // due_dateをYYYY-MM-DD形式に変換
+        if (issue.due_date) {
+            const dueDate = new Date(issue.due_date);
+            const year = dueDate.getFullYear();
+            const month = String(dueDate.getMonth() + 1).padStart(2, '0');
+            const day = String(dueDate.getDate()).padStart(2, '0');
+            document.getElementById('issueDueDate').value = `${year}-${month}-${day}`;
+        } else {
+            document.getElementById('issueDueDate').value = '';
+        }
+        
         document.getElementById('issueDescription').value = issue.description || '';
         
         const dropZone = document.getElementById('dropZone');
