@@ -466,14 +466,9 @@ window.showDetail = async function(id) {
                 </div>
             ` : ''}
             
-            <div class="detail-row">
+            <div class="detail-row" style="border-bottom: none;">
                 <div class="detail-label">登録日時</div>
                 <div class="detail-value">${formatDateTime(issue.created_at)}</div>
-            </div>
-            
-            <div class="detail-row" style="border-bottom: none;">
-                <div class="detail-label">更新日時</div>
-                <div class="detail-value">${formatDateTime(issue.updated_at)}</div>
             </div>
         `;
         
