@@ -206,6 +206,7 @@ function renderIssues() {
         <table class="issues-table">
             <thead>
                 <tr>
+                    <th style="width: 60px;">ID</th>
                     <th class="sortable" onclick="sortIssues('status')">
                         ステータス <i class="fas fa-sort"></i>
                     </th>
@@ -231,8 +232,14 @@ function renderIssues() {
                 </tr>
             </thead>
             <tbody>
-                ${pageIssues.map(issue => `
+                ${pageIssues.map((issue, index) => {
+                    // 全体のインデックスを計算（ページネーション考慮）
+                    const globalIndex = filteredIssues.findIndex(i => i.id === issue.id) + 1;
+                    return `
                     <tr class="issue-row status-${issue.status.replace(/\s/g, '-')}" onclick="showDetail('${issue.id}')">
+                        <td style="font-weight: 600; color: #64748b;">
+                            #${globalIndex}
+                        </td>
                         <td onclick="event.stopPropagation();">
                             <select class="status-select status-${issue.status.replace(/\s/g, '-')}" onchange="changeStatus('${issue.id}', this.value)" data-current="${issue.status}">
                                 <option value="未対応" ${issue.status === '未対応' ? 'selected' : ''}>未対応</option>
@@ -273,7 +280,8 @@ function renderIssues() {
                             </button>
                         </td>
                     </tr>
-                `).join('')}
+                `;
+                }).join('')}
             </tbody>
         </table>
     `;
@@ -372,7 +380,18 @@ window.editIssue = async function(id) {
         document.getElementById('issueCategory').value = issue.category;
         document.getElementById('issueAssignee').value = issue.assignee || '';
         document.getElementById('issuePageUrl').value = issue.page_url || '';
-        document.getElementById('issueDueDate').value = issue.due_date || '';
+        
+        // due_dateをYYYY-MM-DD形式に変換
+        if (issue.due_date) {
+            const dueDate = new Date(issue.due_date);
+            const year = dueDate.getFullYear();
+            const month = String(dueDate.getMonth() + 1).padStart(2, '0');
+            const day = String(dueDate.getDate()).padStart(2, '0');
+            document.getElementById('issueDueDate').value = `${year}-${month}-${day}`;
+        } else {
+            document.getElementById('issueDueDate').value = '';
+        }
+        
         document.getElementById('issueDescription').value = issue.description || '';
         
         const dropZone = document.getElementById('dropZone');
@@ -402,8 +421,16 @@ window.showDetail = async function(id) {
     try {
         const issue = await SupabaseAPI.getById(id);
         
+        // IDを計算
+        const globalIndex = allIssues.findIndex(i => i.id === issue.id) + 1;
+        
         const detailContent = document.getElementById('detailContent');
         detailContent.innerHTML = `
+            <div class="detail-row">
+                <div class="detail-label">ID</div>
+                <div class="detail-value" style="font-weight: 600; color: #64748b; font-size: 18px;">#${globalIndex}</div>
+            </div>
+            
             <div class="detail-row">
                 <div class="detail-label">タイトル</div>
                 <div class="detail-value">${escapeHtml(issue.title)}</div>
@@ -455,14 +482,9 @@ window.showDetail = async function(id) {
                 </div>
             ` : ''}
             
-            <div class="detail-row">
+            <div class="detail-row" style="border-bottom: none;">
                 <div class="detail-label">登録日時</div>
                 <div class="detail-value">${formatDateTime(issue.created_at)}</div>
-            </div>
-            
-            <div class="detail-row" style="border-bottom: none;">
-                <div class="detail-label">更新日時</div>
-                <div class="detail-value">${formatDateTime(issue.updated_at)}</div>
             </div>
         `;
         
@@ -832,6 +854,65 @@ function showSuccess(message) {
         toast.style.animation = 'slideOutRight 0.3s ease';
         setTimeout(() => toast.remove(), 300);
     }, 2000);
+}
+
+// CSVエクスポート機能（グローバル関数）
+window.exportToCSV = function() {
+    // エクスポートするデータ（現在のフィルター済みデータ）
+    const dataToExport = filteredIssues.map((issue, index) => {
+        const globalIndex = allIssues.findIndex(i => i.id === issue.id) + 1;
+        return {
+            ID: `#${globalIndex}`,
+            ステータス: issue.status,
+            優先度: issue.priority,
+            タイトル: issue.title,
+            詳細説明: issue.description || '',
+            カテゴリ: issue.category,
+            担当者: issue.assignee || '',
+            対象ページURL: issue.page_url || '',
+            期限: issue.due_date ? formatDate(issue.due_date) : '',
+            登録日: formatDate(issue.created_at)
+        };
+    });
+    
+    if (dataToExport.length === 0) {
+        alert('エクスポートするデータがありません。');
+        return;
+    }
+    
+    // CSVヘッダー
+    const headers = ['ID', 'ステータス', '優先度', 'タイトル', '詳細説明', 'カテゴリ', '担当者', '対象ページURL', '期限', '登録日'];
+    
+    // CSVデータを作成
+    const csvContent = [
+        headers.join(','),
+        ...dataToExport.map(row => 
+            headers.map(header => {
+                const value = row[header] || '';
+                // カンマや改行を含む場合はダブルクォートで囲む
+                const escaped = String(value).replace(/"/g, '""');
+                return escaped.includes(',') || escaped.includes('\n') || escaped.includes('"') 
+                    ? `"${escaped}"` 
+                    : escaped;
+            }).join(',')
+        )
+    ].join('\n');
+    
+    // BOM付きUTF-8でエンコード（Excel対応）
+    const bom = '\uFEFF';
+    const blob = new Blob([bom + csvContent], { type: 'text/csv;charset=utf-8;' });
+    
+    // ファイル名（日時付き）
+    const now = new Date();
+    const filename = `修正管理表_${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}_${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}.csv`;
+    
+    // ダウンロード
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = filename;
+    link.click();
+    
+    showSuccess(`CSVファイルをエクスポートしました（${dataToExport.length}件）`);
 }
 
 // 使い方・注意事項モーダルの表示（グローバル関数）
