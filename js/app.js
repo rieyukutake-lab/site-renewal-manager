@@ -2,77 +2,75 @@
 let allIssues = [];
 let filteredIssues = [];
 let currentPage = 1;
-const itemsPerPage = 20;
+const itemsPerPage = 50;
+let editingIssueId = null;
 let currentSortField = 'created_at';
-let currentSortOrder = 'desc';
-let currentStatusFilter = '';
+let currentSortOrder = 'desc'; // 'asc' or 'desc'
+let currentStatusFilter = ''; // 現在のステータスフィルター
 
-// DOM要素の参照
+// DOM要素（DOMContentLoaded後に初期化）
 let issuesContainer;
 let addIssueBtn;
 let issueModal;
 let detailModal;
-let modalTitle;
+let closeModal;
+let closeDetailModal;
+let cancelBtn;
 let issueForm;
+let modalTitle;
 let searchInput;
 let screenshotInput;
 let screenshotPreview;
-let editingIssueId = null;
 
-// アプリケーションの初期化
+// アプリケーションの初期化関数
 function initializeApp() {
     // DOM要素の取得
     issuesContainer = document.getElementById('issuesContainer');
     addIssueBtn = document.getElementById('addIssueBtn');
     issueModal = document.getElementById('issueModal');
     detailModal = document.getElementById('detailModal');
-    modalTitle = document.getElementById('modalTitle');
+    closeModal = document.getElementById('closeModal');
+    closeDetailModal = document.getElementById('closeDetailModal');
+    cancelBtn = document.getElementById('cancelBtn');
     issueForm = document.getElementById('issueForm');
+    modalTitle = document.getElementById('modalTitle');
     searchInput = document.getElementById('searchInput');
     screenshotInput = document.getElementById('issueScreenshot');
     screenshotPreview = document.getElementById('screenshotPreview');
     
-    // イベントリスナーの設定
-    setupEventListeners();
-    
-    // ドラッグ&ドロップの設定
-    setupDragAndDrop();
-    
-    // クリップボード貼り付けの設定
-    setupClipboardPaste();
-    
-    // 初期データの読み込み
-    loadIssues();
+    if (addIssueBtn && issueForm) {
+        setupEventListeners();
+        setupDragAndDrop();
+        setupClipboardPaste();
+        loadIssues();
+    }
 }
 
-// DOMContentLoadedイベント
+// 初期化（認証後に呼び出される）
 document.addEventListener('DOMContentLoaded', () => {
-    // 認証チェックは auth.js で行われる
-    // ログイン成功後に initializeApp() が呼ばれる
+    // 認証済みの場合のみ初期化
+    // auth.jsから呼び出されるため、ここでは何もしない
 });
 
 // イベントリスナーの設定
 function setupEventListeners() {
-    // モーダルを開く
-    if (addIssueBtn) {
-        addIssueBtn.addEventListener('click', () => openAddModal());
-    }
+    // モーダル関連
+    // 新規追加ボタンはHTMLのonclickで処理
     
-    // モーダルを閉じる
-    const closeModal = document.getElementById('closeModal');
-    if (closeModal) {
-        closeModal.addEventListener('click', () => closeModals());
-    }
+    if (closeModal) closeModal.addEventListener('click', closeModals);
+    if (closeDetailModal) closeDetailModal.addEventListener('click', closeModals);
+    if (cancelBtn) cancelBtn.addEventListener('click', closeModals);
     
-    const closeDetailModal = document.getElementById('closeDetailModal');
-    if (closeDetailModal) {
-        closeDetailModal.addEventListener('click', () => closeModals());
+    // モーダル外クリックで閉じる
+    if (issueModal) {
+        issueModal.addEventListener('click', (e) => {
+            if (e.target === issueModal) closeModals();
+        });
     }
-    
-    // キャンセルボタン
-    const cancelBtn = document.getElementById('cancelBtn');
-    if (cancelBtn) {
-        cancelBtn.addEventListener('click', () => closeModals());
+    if (detailModal) {
+        detailModal.addEventListener('click', (e) => {
+            if (e.target === detailModal) closeModals();
+        });
     }
     
     // フォーム送信
@@ -81,114 +79,114 @@ function setupEventListeners() {
     }
     
     // 検索
-    if (searchInput) {
-        searchInput.addEventListener('input', debounce(handleSearch, 300));
-    }
+    if (searchInput) searchInput.addEventListener('input', debounce(applyFilters, 300));
     
-    // ファイル選択ボタン
-    const selectFileBtn = document.getElementById('selectFileBtn');
-    if (selectFileBtn) {
-        selectFileBtn.addEventListener('click', () => {
-            if (screenshotInput) screenshotInput.click();
-        });
-    }
+    // 画像アップロード
+    if (screenshotInput) screenshotInput.addEventListener('change', handleImageUpload);
     
-    // ファイル選択
-    if (screenshotInput) {
-        screenshotInput.addEventListener('change', handleImageUpload);
-    }
-    
-    // モーダル外クリックで閉じる
-    if (issueModal) {
-        issueModal.addEventListener('click', (e) => {
-            if (e.target === issueModal) closeModals();
-        });
-    }
-    
-    if (detailModal) {
-        detailModal.addEventListener('click', (e) => {
-            if (e.target === detailModal) closeModals();
-        });
-    }
 }
 
-// データの読み込み
+// 修正項目の読み込み
 async function loadIssues() {
     try {
         showLoading();
-        
-        const data = await SupabaseAPI.getAll();
-        allIssues = data || [];
-        
+        allIssues = await SupabaseAPI.getAll();
         applyFilters();
-        updateStatistics();
-        renderIssues();
-        renderPagination();
+        updateStats();
     } catch (error) {
         console.error('データの読み込みに失敗しました:', error);
         showError('データの読み込みに失敗しました。');
     }
 }
 
-// 検索処理
-function handleSearch() {
+// フィルターの適用
+function applyFilters() {
+    const searchText = searchInput ? searchInput.value.toLowerCase() : '';
+    
+    filteredIssues = allIssues.filter(issue => {
+        const matchStatus = !currentStatusFilter || issue.status === currentStatusFilter;
+        const matchSearch = !searchText || 
+            issue.title.toLowerCase().includes(searchText) ||
+            (issue.description && issue.description.toLowerCase().includes(searchText));
+        
+        return matchStatus && matchSearch;
+    });
+    
+    // ソートを適用
+    applySorting();
+    
+    currentPage = 1;
+    renderIssues();
+    renderPagination();
+    updateStatCardsActiveState();
+}
+
+// ステータスでフィルター（グローバル関数）
+window.filterByStatus = function(status) {
+    currentStatusFilter = status;
     applyFilters();
+};
+
+// 統計カードのアクティブ状態を更新
+function updateStatCardsActiveState() {
+    const statCards = document.querySelectorAll('.stat-card');
+    statCards.forEach(card => {
+        const filterValue = card.getAttribute('data-filter');
+        if (filterValue === currentStatusFilter) {
+            card.classList.add('active');
+        } else {
+            card.classList.remove('active');
+        }
+    });
+}
+
+// ソート機能（グローバル関数）
+window.sortIssues = function(field) {
+    // 同じフィールドをクリックした場合は昇順/降順を切り替え
+    if (currentSortField === field) {
+        currentSortOrder = currentSortOrder === 'asc' ? 'desc' : 'asc';
+    } else {
+        currentSortField = field;
+        currentSortOrder = 'asc';
+    }
+    
+    applySorting();
     renderIssues();
     renderPagination();
 }
 
-// フィルター適用
-function applyFilters() {
-    let filtered = [...allIssues];
-    
-    // ステータスフィルター
-    if (currentStatusFilter) {
-        filtered = filtered.filter(issue => issue.status === currentStatusFilter);
-    }
-    
-    // 検索フィルター
-    const searchTerm = searchInput ? searchInput.value.toLowerCase() : '';
-    if (searchTerm) {
-        filtered = filtered.filter(issue => {
-            return (
-                issue.title.toLowerCase().includes(searchTerm) ||
-                (issue.description && issue.description.toLowerCase().includes(searchTerm))
-            );
-        });
-    }
-    
-    // ソート
-    filtered.sort((a, b) => {
-        let aVal = a[currentSortField];
-        let bVal = b[currentSortField];
+// ソートを適用
+function applySorting() {
+    filteredIssues.sort((a, b) => {
+        let aValue = a[currentSortField];
+        let bValue = b[currentSortField];
         
-        if (currentSortField === 'created_at' || currentSortField === 'due_date') {
-            aVal = aVal ? new Date(aVal).getTime() : 0;
-            bVal = bVal ? new Date(bVal).getTime() : 0;
+        // 優先度のソート順序を定義
+        if (currentSortField === 'priority') {
+            const priorityOrder = { '高': 1, '中': 2, '低': 3 };
+            aValue = priorityOrder[aValue] || 999;
+            bValue = priorityOrder[bValue] || 999;
         }
         
-        if (currentSortOrder === 'asc') {
-            return aVal > bVal ? 1 : -1;
-        } else {
-            return aVal < bVal ? 1 : -1;
+        // ステータスのソート順序を定義
+        if (currentSortField === 'status') {
+            const statusOrder = { '未対応': 1, '対応中': 2, '確認待ち': 3, '完了': 4, '保留': 5 };
+            aValue = statusOrder[aValue] || 999;
+            bValue = statusOrder[bValue] || 999;
         }
+        
+        // 空の値を最後に
+        if (!aValue && aValue !== 0) aValue = currentSortOrder === 'asc' ? 'zzz' : '';
+        if (!bValue && bValue !== 0) bValue = currentSortOrder === 'asc' ? 'zzz' : '';
+        
+        // 比較
+        if (aValue < bValue) return currentSortOrder === 'asc' ? -1 : 1;
+        if (aValue > bValue) return currentSortOrder === 'asc' ? 1 : -1;
+        return 0;
     });
-    
-    filteredIssues = filtered;
-    currentPage = 1;
 }
 
-// 統計情報の更新
-function updateStatistics() {
-    document.getElementById('statTotal').textContent = allIssues.length;
-    document.getElementById('statPending').textContent = allIssues.filter(i => i.status === '未対応').length;
-    document.getElementById('statProgress').textContent = allIssues.filter(i => i.status === '対応中').length;
-    document.getElementById('statWaiting').textContent = allIssues.filter(i => i.status === '確認待ち').length;
-    document.getElementById('statCompleted').textContent = allIssues.filter(i => i.status === '完了').length;
-    document.getElementById('statOnHold').textContent = allIssues.filter(i => i.status === '保留').length;
-}
-
-// リストの描画
+// 修正項目の表示（リスト形式）
 function renderIssues() {
     if (filteredIssues.length === 0) {
         issuesContainer.innerHTML = `
@@ -302,7 +300,7 @@ function renderPagination() {
     let html = '';
     
     // 前へボタン
-    html += `<button class="page-btn" onclick="changePage(${currentPage - 1})" ${currentPage === 1 ? 'disabled' : ''}>
+    html += `<button class="page-btn" ${currentPage === 1 ? 'disabled' : ''} onclick="changePage(${currentPage - 1})">
         <i class="fas fa-chevron-left"></i>
     </button>`;
     
@@ -311,12 +309,12 @@ function renderPagination() {
         if (i === 1 || i === totalPages || (i >= currentPage - 2 && i <= currentPage + 2)) {
             html += `<button class="page-btn ${i === currentPage ? 'active' : ''}" onclick="changePage(${i})">${i}</button>`;
         } else if (i === currentPage - 3 || i === currentPage + 3) {
-            html += `<span>...</span>`;
+            html += `<span class="page-btn" disabled>...</span>`;
         }
     }
     
     // 次へボタン
-    html += `<button class="page-btn" onclick="changePage(${currentPage + 1})" ${currentPage === totalPages ? 'disabled' : ''}>
+    html += `<button class="page-btn" ${currentPage === totalPages ? 'disabled' : ''} onclick="changePage(${currentPage + 1})">
         <i class="fas fa-chevron-right"></i>
     </button>`;
     
@@ -324,53 +322,29 @@ function renderPagination() {
 }
 
 // ページ変更
-window.changePage = function(page) {
-    const totalPages = Math.ceil(filteredIssues.length / itemsPerPage);
-    if (page < 1 || page > totalPages) return;
-    
+function changePage(page) {
     currentPage = page;
     renderIssues();
     renderPagination();
     window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
-// ソート
-window.sortIssues = function(field) {
-    if (currentSortField === field) {
-        currentSortOrder = currentSortOrder === 'asc' ? 'desc' : 'asc';
-    } else {
-        currentSortField = field;
-        currentSortOrder = 'asc';
-    }
-    
-    applyFilters();
-    renderIssues();
+// 統計情報の更新
+function updateStats() {
+    document.getElementById('statTotal').textContent = allIssues.length;
+    document.getElementById('statPending').textContent = allIssues.filter(i => i.status === '未対応').length;
+    document.getElementById('statProgress').textContent = allIssues.filter(i => i.status === '対応中').length;
+    document.getElementById('statWaiting').textContent = allIssues.filter(i => i.status === '確認待ち').length;
+    document.getElementById('statCompleted').textContent = allIssues.filter(i => i.status === '完了').length;
+    document.getElementById('statOnHold').textContent = allIssues.filter(i => i.status === '保留').length;
 }
 
-// ステータスフィルター
-window.filterByStatus = function(status) {
-    currentStatusFilter = status;
-    
-    // カードのアクティブ状態を更新
-    document.querySelectorAll('.stat-card').forEach(card => {
-        card.classList.remove('active');
-    });
-    
-    const activeCard = document.querySelector(`.stat-card[data-filter="${status}"]`);
-    if (activeCard) {
-        activeCard.classList.add('active');
-    }
-    
-    applyFilters();
-    renderIssues();
-    renderPagination();
-}
-
-// 新規追加モーダルを開く（グローバル関数）
+// 新規追加モーダルを開く（グローバル関数として定義）
 window.openAddModal = function() {
+    // DOM要素を再取得（念のため）
     const modal = issueModal || document.getElementById('issueModal');
-    const title = modalTitle || document.getElementById('modalTitle');
     const form = issueForm || document.getElementById('issueForm');
+    const title = modalTitle || document.getElementById('modalTitle');
     const preview = screenshotPreview || document.getElementById('screenshotPreview');
     
     if (!modal) return;
@@ -520,240 +494,453 @@ window.showDetail = async function(id) {
         alert('データの読み込みに失敗しました。');
     }
 }
-// ========================================
-// 4. データ表示とレンダリング
-// ========================================
 
-let currentPage = 1;
-const itemsPerPage = 10;
+// フォーム送信中フラグ
+let isSubmitting = false;
 
-function renderIssues() {
-    const container = document.getElementById('issuesContainer');
+// フォーム送信処理
+async function handleSubmit(e) {
+    e.preventDefault();
     
-    if (filteredIssues.length === 0) {
-        container.innerHTML = `
-            <div class="no-issues">
-                <p>📋 修正項目がありません</p>
-                <p class="text-muted">右上の「新規追加」ボタンから項目を追加できます</p>
-            </div>
-        `;
-        document.getElementById('pagination').innerHTML = '';
-        return;
-    }
-
-    const start = (currentPage - 1) * itemsPerPage;
-    const end = start + itemsPerPage;
-    const paginatedIssues = filteredIssues.slice(start, end);
-    
-    container.innerHTML = `
-        <table class="issues-table">
-            <thead>
-                <tr>
-                    <th onclick="sortIssues('index')">ID</th>
-                    <th onclick="sortIssues('status')">ステータス ▼</th>
-                    <th onclick="sortIssues('priority')">優先度 ▼</th>
-                    <th onclick="sortIssues('title')">タイトル・詳細 ▼</th>
-                    <th onclick="sortIssues('category')">カテゴリ ▼</th>
-                    <th onclick="sortIssues('assignee')">担当者 ▼</th>
-                    <th onclick="sortIssues('due_date')">期限 ▼</th>
-                    <th onclick="sortIssues('created_at')">登録日 ▼</th>
-                    <th class="actions-column">操作</th>
-                </tr>
-            </thead>
-            <tbody>
-                ${paginatedIssues.map((issue, index) => {
-                    const rowId = start + index + 1;
-                    return `
-                    <tr>
-                        <td class="id-column">#${rowId}</td>
-                        <td class="status-column">
-                            <select class="status-select status-${issue.status}" onchange="changeStatus('${issue.id}', this.value)">
-                                <option value="未対応" ${issue.status === '未対応' ? 'selected' : ''}>未対応</option>
-                                <option value="対応中" ${issue.status === '対応中' ? 'selected' : ''}>対応中</option>
-                                <option value="確認待ち" ${issue.status === '確認待ち' ? 'selected' : ''}>確認待ち</option>
-                                <option value="完了" ${issue.status === '完了' ? 'selected' : ''}>完了</option>
-                                <option value="保留" ${issue.status === '保留' ? 'selected' : ''}>保留</option>
-                            </select>
-                        </td>
-                        <td><span class="priority-badge priority-${issue.priority}">${issue.priority}</span></td>
-                        <td class="title-column">
-                            <div class="title-wrapper">
-                                <strong>${escapeHtml(issue.title)}</strong>
-                                ${issue.screenshot ? '<i class="fas fa-image screenshot-icon" title="画像あり"></i>' : ''}
-                            </div>
-                            ${issue.description ? `<div class="description-preview">${escapeHtml(truncateText(issue.description, 60))}</div>` : ''}
-                        </td>
-                        <td>${escapeHtml(issue.category)}</td>
-                        <td>${escapeHtml(issue.assignee)}</td>
-                        <td class="${isOverdue(issue.due_date) ? 'overdue-date' : ''}">${formatDate(issue.due_date)}</td>
-                        <td>${formatDate(issue.created_at)}</td>
-                        <td class="actions-column">
-                            <button class="btn-icon" onclick="showDetail('${issue.id}')" title="詳細表示">
-                                <i class="fas fa-eye"></i>
-                            </button>
-                            <button class="btn-icon" onclick="editIssue('${issue.id}')" title="編集">
-                                <i class="fas fa-edit"></i>
-                            </button>
-                            <button class="btn-icon btn-icon-delete" onclick="if(confirm('この項目を削除しますか？')) deleteIssue('${issue.id}')" title="削除">
-                                <i class="fas fa-trash"></i>
-                            </button>
-                        </td>
-                    </tr>
-                `;
-                }).join('')}
-            </tbody>
-        </table>
-    `;
-    
-    renderPagination();
-}
-
-function renderPagination() {
-    const totalPages = Math.ceil(filteredIssues.length / itemsPerPage);
-    const pagination = document.getElementById('pagination');
-    
-    if (totalPages <= 1) {
-        pagination.innerHTML = '';
+    // 多重送信を防ぐ
+    if (isSubmitting) {
+        console.log('⚠️ すでに送信中です');
         return;
     }
     
-    let html = '<div class="pagination-container">';
+    isSubmitting = true;
     
-    if (currentPage > 1) {
-        html += `<button class="pagination-btn" onclick="goToPage(${currentPage - 1})">前へ</button>`;
-    }
+    const formData = {
+        title: document.getElementById('issueTitle').value,
+        status: document.getElementById('issueStatus').value,
+        priority: document.getElementById('issuePriority').value,
+        category: document.getElementById('issueCategory').value,
+        assignee: document.getElementById('issueAssignee').value,
+        page_url: document.getElementById('issuePageUrl').value,
+        due_date: document.getElementById('issueDueDate').value || null, // 空の場合はnull
+        description: document.getElementById('issueDescription').value,
+        screenshot: ''
+    };
     
-    for (let i = 1; i <= totalPages; i++) {
-        if (i === 1 || i === totalPages || (i >= currentPage - 2 && i <= currentPage + 2)) {
-            html += `<button class="pagination-btn ${i === currentPage ? 'active' : ''}" onclick="goToPage(${i})">${i}</button>`;
-        } else if (i === currentPage - 3 || i === currentPage + 3) {
-            html += `<span class="pagination-dots">...</span>`;
+    // スクリーンショットの取得
+    const previewImg = screenshotPreview.querySelector('img');
+    if (previewImg) {
+        formData.screenshot = previewImg.src;
+        
+        // Base64データのサイズチェック（約2MB）
+        const sizeInBytes = Math.ceil((formData.screenshot.length * 3) / 4);
+        const sizeInMB = sizeInBytes / (1024 * 1024);
+        
+        console.log(`📦 画像サイズ: ${sizeInMB.toFixed(2)}MB`);
+        
+        if (sizeInMB > 5) {
+            alert(`画像サイズが大きすぎます（${sizeInMB.toFixed(2)}MB）。\n5MB以下の画像を使用してください。\n\n画像をもっと小さくトリミングしてください。`);
+            isSubmitting = false;
+            return;
         }
     }
     
-    if (currentPage < totalPages) {
-        html += `<button class="pagination-btn" onclick="goToPage(${currentPage + 1})">次へ</button>`;
+    try {
+        if (editingIssueId) {
+            // 更新
+            await SupabaseAPI.update(editingIssueId, formData);
+        } else {
+            // 新規作成
+            await SupabaseAPI.create(formData);
+        }
+        
+        closeModals();
+        await loadIssues();
+        showSuccess(editingIssueId ? '更新しました' : '登録しました');
+    } catch (error) {
+        console.error('保存エラー:', error);
+        alert('保存に失敗しました。もう一度お試しください。');
+    } finally {
+        // 送信中フラグをリセット
+        isSubmitting = false;
+    }
+}
+
+// 削除処理（グローバル関数）
+window.deleteIssue = async function(id) {
+    if (!confirm('この修正項目を削除してもよろしいですか?')) {
+        return;
     }
     
-    html += '</div>';
-    pagination.innerHTML = html;
+    try {
+        await SupabaseAPI.delete(id);
+        await loadIssues();
+        showSuccess('削除しました');
+    } catch (error) {
+        console.error('削除エラー:', error);
+        alert('削除に失敗しました。もう一度お試しください。');
+    }
+};
+
+// ステータス変更（グローバル関数）
+window.changeStatus = async function(id, newStatus) {
+    try {
+        // ステータスのみを更新
+        await SupabaseAPI.update(id, { status: newStatus });
+        await loadIssues();
+        showSuccess(`ステータスを「${newStatus}」に変更しました`);
+    } catch (error) {
+        console.error('ステータス変更エラー:', error);
+        alert('ステータスの変更に失敗しました。');
+        await loadIssues();
+    }
+};
+
+// 画像アップロード処理
+function handleImageUpload(e) {
+    const file = e.target.files[0];
+    if (!file) return;
+    processImageFile(file);
 }
 
-function goToPage(page) {
-    currentPage = page;
-    renderIssues();
-    window.scrollTo({top: 0, behavior: 'smooth'});
-}
-
-// ========================================
-// 5. CSV エクスポート機能
-// ========================================
-
-function exportToCSV() {
-    const headers = ['ID', 'ステータス', '優先度', 'タイトル', '詳細説明', 'カテゴリ', '担当者', '対象ページURL', '期限', '登録日'];
+// 画像ファイルの処理（共通関数）
+function processImageFile(file) {
+    // 画像ファイルかチェック
+    if (!file.type.startsWith('image/')) {
+        alert('画像ファイルを選択してください。');
+        return;
+    }
     
-    const rows = filteredIssues.map((issue, index) => {
-        return [
-            `#${index + 1}`,
-            issue.status,
-            issue.priority,
-            escapeCSV(issue.title),
-            escapeCSV(issue.description || ''),
-            escapeCSV(issue.category),
-            escapeCSV(issue.assignee),
-            escapeCSV(issue.page_url || ''),
-            formatDate(issue.due_date),
-            formatDate(issue.created_at)
-        ];
+    // 画像を読み込んでリサイズ＆WebP変換
+    const reader = new FileReader();
+    reader.onload = function(event) {
+        resizeAndConvertImage(event.target.result);
+    };
+    reader.readAsDataURL(file);
+}
+
+// 画像をリサイズしてWebPに変換
+function resizeAndConvertImage(dataUrl) {
+    const img = new Image();
+    img.onload = function() {
+        // 最大幅・高さを設定（これより大きい場合はリサイズ）
+        const maxWidth = 2560;
+        const maxHeight = 2560;
+        
+        let width = img.width;
+        let height = img.height;
+        
+        // アスペクト比を維持しながらリサイズ
+        if (width > maxWidth || height > maxHeight) {
+            const ratio = Math.min(maxWidth / width, maxHeight / height);
+            width = Math.floor(width * ratio);
+            height = Math.floor(height * ratio);
+        }
+        
+        // Canvasで画像を描画
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, width, height);
+        
+        // WebPに変換（品質90%）
+        // WebPがサポートされていない場合はJPEGにフォールバック
+        let outputFormat = 'image/webp';
+        let quality = 0.9;
+        
+        // WebPをサポートしているかチェック
+        const webpDataUrl = canvas.toDataURL('image/webp', quality);
+        if (webpDataUrl.indexOf('data:image/webp') !== 0) {
+            // WebP非対応の場合はJPEGを使用
+            outputFormat = 'image/jpeg';
+        }
+        
+        const finalDataUrl = canvas.toDataURL(outputFormat, quality);
+        
+        // サイズを確認
+        const sizeInBytes = Math.ceil((finalDataUrl.length * 3) / 4);
+        const sizeInMB = sizeInBytes / (1024 * 1024);
+        
+        console.log(`画像変換完了: ${img.width}x${img.height} → ${width}x${height}, サイズ: ${sizeInMB.toFixed(2)}MB`);
+        
+        // サイズが大きすぎる場合は警告
+        if (sizeInMB > 5) {
+            alert(`画像サイズが大きすぎます（${sizeInMB.toFixed(2)}MB）。\n5MB以下の画像を使用してください。\n\n画像をもっと小さくトリミングするか、範囲を狭くしてください。`);
+            return;
+        }
+        
+        // プレビュー表示
+        displayImagePreview(finalDataUrl);
+    };
+    
+    img.onerror = function() {
+        alert('画像の読み込みに失敗しました。');
+    };
+    
+    img.src = dataUrl;
+}
+
+// 画像プレビュー表示
+function displayImagePreview(dataUrl) {
+    const dropZone = document.getElementById('dropZone');
+    if (dropZone) {
+        dropZone.style.display = 'none';
+    }
+    
+    screenshotPreview.innerHTML = `
+        <img src="${dataUrl}" alt="プレビュー">
+        <button type="button" class="remove-screenshot" onclick="removeScreenshot()">×</button>
+    `;
+    screenshotPreview.classList.add('show');
+}
+
+// ドラッグ&ドロップ機能の設定
+function setupDragAndDrop() {
+    const dropZone = document.getElementById('dropZone');
+    if (!dropZone) return;
+    
+    // ドラッグオーバー
+    dropZone.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        dropZone.classList.add('drag-over');
     });
     
-    const csvContent = '\uFEFF' + [headers, ...rows].map(row => row.join(',')).join('\n');
+    // ドラッグ離脱
+    dropZone.addEventListener('dragleave', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        dropZone.classList.remove('drag-over');
+    });
     
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const link = document.createElement('a');
-    const url = URL.createObjectURL(blob);
-    const timestamp = new Date().toISOString().slice(0, 16).replace('T', '_').replace(/:/g, '');
-    link.setAttribute('href', url);
-    link.setAttribute('download', `修正管理表_${timestamp}.csv`);
-    link.style.visibility = 'hidden';
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-}
-
-function escapeCSV(text) {
-    if (!text) return '';
-    const str = String(text);
-    if (str.includes(',') || str.includes('"') || str.includes('\n')) {
-        return `"${str.replace(/"/g, '""')}"`;
+    // ドロップ
+    dropZone.addEventListener('drop', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        dropZone.classList.remove('drag-over');
+        
+        const files = e.dataTransfer.files;
+        if (files.length > 0) {
+            processImageFile(files[0]);
+        }
+    });
+    
+    // ファイル選択ボタン
+    const selectFileBtn = document.getElementById('selectFileBtn');
+    if (selectFileBtn) {
+        selectFileBtn.addEventListener('click', () => {
+            screenshotInput.click();
+        });
     }
-    return str;
 }
 
-// ========================================
-// 6. ヘルパー関数
-// ========================================
+// クリップボードからのペースト機能
+function setupClipboardPaste() {
+    // モーダル全体でペーストイベントをキャッチ
+    const issueModal = document.getElementById('issueModal');
+    if (!issueModal) return;
+    
+    issueModal.addEventListener('paste', (e) => {
+        const items = e.clipboardData.items;
+        
+        for (let i = 0; i < items.length; i++) {
+            const item = items[i];
+            
+            // 画像データの場合
+            if (item.type.indexOf('image') !== -1) {
+                e.preventDefault();
+                const file = item.getAsFile();
+                processImageFile(file);
+                break;
+            }
+        }
+    });
+}
 
+// スクリーンショット削除（グローバル関数）
+window.removeScreenshot = function() {
+    const dropZone = document.getElementById('dropZone');
+    if (dropZone) {
+        dropZone.style.display = 'flex';
+    }
+    
+    screenshotPreview.innerHTML = '';
+    screenshotPreview.classList.remove('show');
+    screenshotInput.value = '';
+}
+
+// 画像モーダル表示（グローバル関数）
+window.showImageModal = function(src) {
+    const modal = document.createElement('div');
+    modal.className = 'modal show';
+    modal.style.zIndex = '2000';
+    modal.innerHTML = `
+        <div class="modal-content" style="max-width: 90%; max-height: 90vh; padding: 0; overflow-y: auto; overflow-x: hidden;">
+            <img src="${src}" style="width: 100%; height: auto; display: block;">
+        </div>
+    `;
+    modal.addEventListener('click', () => modal.remove());
+    document.body.appendChild(modal);
+}
+
+// モーダルを閉じる
+// モーダルを閉じる（グローバル関数）
+window.closeModals = function() {
+    const modal1 = issueModal || document.getElementById('issueModal');
+    const modal2 = detailModal || document.getElementById('detailModal');
+    
+    if (modal1) modal1.classList.remove('show');
+    if (modal2) modal2.classList.remove('show');
+};
+
+// ユーティリティ関数
 function escapeHtml(text) {
-    if (!text) return '';
     const div = document.createElement('div');
     div.textContent = text;
     return div.innerHTML;
 }
 
 function truncateText(text, maxLength) {
-    if (!text || text.length <= maxLength) return text;
+    if (!text) return '';
+    if (text.length <= maxLength) return text;
     return text.substring(0, maxLength) + '...';
 }
 
 function formatDate(dateString) {
-    if (!dateString) return '-';
-    try {
-        const date = new Date(dateString);
-        const year = date.getFullYear();
-        const month = String(date.getMonth() + 1).padStart(2, '0');
-        const day = String(date.getDate()).padStart(2, '0');
-        return `${year}/${month}/${day}`;
-    } catch (e) {
-        return '-';
-    }
+    if (!dateString) return '';
+    const date = new Date(dateString);
+    return date.toLocaleDateString('ja-JP');
 }
 
-function isOverdue(dueDateString) {
-    if (!dueDateString) return false;
-    const dueDate = new Date(dueDateString);
+function formatDateTime(timestamp) {
+    if (!timestamp) return '';
+    const date = new Date(timestamp);
+    return date.toLocaleString('ja-JP');
+}
+
+function isOverdue(dateString) {
+    if (!dateString) return false;
+    const dueDate = new Date(dateString);
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     return dueDate < today;
 }
 
-function showSuccess(message) {
-    alert(message);
+function debounce(func, wait) {
+    let timeout;
+    return function executedFunction(...args) {
+        const later = () => {
+            clearTimeout(timeout);
+            func(...args);
+        };
+        clearTimeout(timeout);
+        timeout = setTimeout(later, wait);
+    };
+}
+
+function showLoading() {
+    issuesContainer.innerHTML = '<div class="loading">読み込み中...</div>';
 }
 
 function showError(message) {
-    alert(message);
+    issuesContainer.innerHTML = `<div class="empty-state" style="grid-column: 1/-1;"><i class="fas fa-exclamation-triangle"></i><p>${message}</p></div>`;
 }
 
-// ========================================
-// 7. 初期化
-// ========================================
+function showSuccess(message) {
+    // 簡易的な成功メッセージ表示
+    const toast = document.createElement('div');
+    toast.style.cssText = 'position: fixed; top: 20px; right: 20px; background: #10b981; color: white; padding: 16px 24px; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); z-index: 3000; animation: slideInRight 0.3s ease;';
+    toast.innerHTML = `<i class="fas fa-check-circle"></i> ${message}`;
+    document.body.appendChild(toast);
+    
+    setTimeout(() => {
+        toast.style.animation = 'slideOutRight 0.3s ease';
+        setTimeout(() => toast.remove(), 300);
+    }, 2000);
+}
 
-console.log('🔵 app.js loaded');
-window.loadIssues = loadIssues;
-window.openNewIssueModal = openNewIssueModal;
-window.closeModal = closeModal;
-window.handleSubmit = handleSubmit;
-window.removeScreenshot = removeScreenshot;
-window.changeStatus = changeStatus;
-window.deleteIssue = deleteIssue;
-window.editIssue = editIssue;
-window.showDetail = showDetail;
-window.searchIssues = searchIssues;
-window.filterByStatus = filterByStatus;
-window.sortIssues = sortIssues;
-window.processImageFile = processImageFile;
-window.handleImageUpload = handleImageUpload;
-window.goToPage = goToPage;
-window.exportToCSV = exportToCSV;
-window.closeModals = closeModals;
+// CSVエクスポート機能（グローバル関数）
+window.exportToCSV = function() {
+    // エクスポートするデータ（現在のフィルター済みデータ）
+    const dataToExport = filteredIssues.map((issue, index) => {
+        const globalIndex = allIssues.findIndex(i => i.id === issue.id) + 1;
+        return {
+            ID: `#${globalIndex}`,
+            ステータス: issue.status,
+            優先度: issue.priority,
+            タイトル: issue.title,
+            詳細説明: issue.description || '',
+            カテゴリ: issue.category,
+            担当者: issue.assignee || '',
+            対象ページURL: issue.page_url || '',
+            期限: issue.due_date ? formatDate(issue.due_date) : '',
+            登録日: formatDate(issue.created_at)
+        };
+    });
+    
+    if (dataToExport.length === 0) {
+        alert('エクスポートするデータがありません。');
+        return;
+    }
+    
+    // CSVヘッダー
+    const headers = ['ID', 'ステータス', '優先度', 'タイトル', '詳細説明', 'カテゴリ', '担当者', '対象ページURL', '期限', '登録日'];
+    
+    // CSVデータを作成
+    const csvContent = [
+        headers.join(','),
+        ...dataToExport.map(row => 
+            headers.map(header => {
+                const value = row[header] || '';
+                // カンマや改行を含む場合はダブルクォートで囲む
+                const escaped = String(value).replace(/"/g, '""');
+                return escaped.includes(',') || escaped.includes('\n') || escaped.includes('"') 
+                    ? `"${escaped}"` 
+                    : escaped;
+            }).join(',')
+        )
+    ].join('\n');
+    
+    // BOM付きUTF-8でエンコード（Excel対応）
+    const bom = '\uFEFF';
+    const blob = new Blob([bom + csvContent], { type: 'text/csv;charset=utf-8;' });
+    
+    // ファイル名（日時付き）
+    const now = new Date();
+    const filename = `修正管理表_${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}_${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}.csv`;
+    
+    // ダウンロード
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = filename;
+    link.click();
+    
+    showSuccess(`CSVファイルをエクスポートしました（${dataToExport.length}件）`);
+}
+
+// 使い方・注意事項モーダルの表示（グローバル関数）
+window.showGuideModal = function() {
+    const guideModal = document.getElementById('guideModal');
+    if (guideModal) {
+        guideModal.classList.add('show');
+    }
+}
+
+// 使い方・注意事項モーダルを閉じる（グローバル関数）
+window.closeGuideModal = function() {
+    const guideModal = document.getElementById('guideModal');
+    if (guideModal) {
+        guideModal.classList.remove('show');
+    }
+}
+
+// アニメーション用CSS追加
+const style = document.createElement('style');
+style.textContent = `
+    @keyframes slideInRight {
+        from { transform: translateX(400px); opacity: 0; }
+        to { transform: translateX(0); opacity: 1; }
+    }
+    @keyframes slideOutRight {
+        from { transform: translateX(0); opacity: 1; }
+        to { transform: translateX(400px); opacity: 0; }
+    }
+`;
+document.head.appendChild(style);
