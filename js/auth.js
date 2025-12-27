@@ -82,8 +82,13 @@ function login() {
 // ログアウト処理（グローバル関数として公開）
 window.logout = function() {
     if (confirm('ログアウトしますか？')) {
-        sessionStorage.removeItem(AUTH_KEY);
-        location.reload();
+        // UI更新をブロックしないように非同期処理
+        requestAnimationFrame(() => {
+            sessionStorage.removeItem(AUTH_KEY);
+            setTimeout(() => {
+                location.reload();
+            }, 0);
+        });
     }
 }
 
