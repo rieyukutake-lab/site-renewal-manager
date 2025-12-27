@@ -2,66 +2,36 @@
 let allIssues = [];
 let filteredIssues = [];
 let currentPage = 1;
-const itemsPerPage = 50;
+const itemsPerPage = 10;
 let editingIssueId = null;
 let currentSortField = 'created_at';
-let currentSortOrder = 'desc'; // 'asc' or 'desc'
-let currentStatusFilter = ''; // 現在のステータスフィルター
+let currentSortOrder = 'desc';
+let currentStatusFilter = '';
 
-// DOM要素（DOMContentLoaded後に初期化）
+// DOM要素
 let issuesContainer;
-let addIssueBtn;
 let issueModal;
 let detailModal;
-let closeModal;
-let closeDetailModal;
-let cancelBtn;
 let issueForm;
-let modalTitle;
 let searchInput;
 let screenshotInput;
 let screenshotPreview;
 
-// アプリケーションの初期化関数
-function initializeApp() {
-    // DOM要素の取得
-    issuesContainer = document.getElementById('issuesContainer');
-    addIssueBtn = document.getElementById('addIssueBtn');
-    issueModal = document.getElementById('issueModal');
-    detailModal = document.getElementById('detailModal');
-    closeModal = document.getElementById('closeModal');
-    closeDetailModal = document.getElementById('closeDetailModal');
-    cancelBtn = document.getElementById('cancelBtn');
-    issueForm = document.getElementById('issueForm');
-    modalTitle = document.getElementById('modalTitle');
-    searchInput = document.getElementById('searchInput');
-    screenshotInput = document.getElementById('issueScreenshot');
-    screenshotPreview = document.getElementById('screenshotPreview');
-    
-    if (addIssueBtn && issueForm) {
-        setupEventListeners();
-        setupDragAndDrop();
-        setupClipboardPaste();
-        loadIssues();
-    }
-}
-
-// 初期化（認証後に呼び出される）
+// 初期化
 document.addEventListener('DOMContentLoaded', () => {
-    // 認証済みの場合のみ初期化
-    // auth.jsから呼び出されるため、ここでは何もしない
+    console.log('🔵 app.js DOMContentLoaded');
 });
 
 // イベントリスナーの設定
 function setupEventListeners() {
-    // モーダル関連
-    // 新規追加ボタンはHTMLのonclickで処理
+    const closeModal = document.getElementById('closeModal');
+    const closeDetailModal = document.getElementById('closeDetailModal');
+    const cancelBtn = document.getElementById('cancelBtn');
     
     if (closeModal) closeModal.addEventListener('click', closeModals);
     if (closeDetailModal) closeDetailModal.addEventListener('click', closeModals);
     if (cancelBtn) cancelBtn.addEventListener('click', closeModals);
     
-    // モーダル外クリックで閉じる
     if (issueModal) {
         issueModal.addEventListener('click', (e) => {
             if (e.target === issueModal) closeModals();
@@ -73,20 +43,37 @@ function setupEventListeners() {
         });
     }
     
-    // フォーム送信
     if (issueForm) {
         issueForm.addEventListener('submit', handleSubmit);
     }
     
-    // 検索
-    if (searchInput) searchInput.addEventListener('input', debounce(applyFilters, 300));
+    if (searchInput) {
+        searchInput.addEventListener('input', debounce(searchIssues, 300));
+    }
     
-    // 画像アップロード
-    if (screenshotInput) screenshotInput.addEventListener('change', handleImageUpload);
+    if (screenshotInput) {
+        screenshotInput.addEventListener('change', handleImageUpload);
+    }
     
+    setupDragAndDrop();
+    setupClipboardPaste();
 }
 
-// 修正項目の読み込み
+// アプリ初期化（認証後に呼ばれる）
+function initializeApp() {
+    issuesContainer = document.getElementById('issuesContainer');
+    issueModal = document.getElementById('issueModal');
+    detailModal = document.getElementById('detailModal');
+    issueForm = document.getElementById('issueForm');
+    searchInput = document.getElementById('searchInput');
+    screenshotInput = document.getElementById('issueScreenshot');
+    screenshotPreview = document.getElementById('screenshotPreview');
+    
+    setupEventListeners();
+    loadIssues();
+}
+
+// データ読み込み
 async function loadIssues() {
     try {
         showLoading();
@@ -99,312 +86,160 @@ async function loadIssues() {
     }
 }
 
-// フィルターの適用
-function applyFilters() {
-    const searchText = searchInput ? searchInput.value.toLowerCase() : '';
+// 統計情報の更新
+function updateStats() {
+    const stats = {
+        total: allIssues.length,
+        pending: allIssues.filter(i => i.status === '未対応').length,
+        progress: allIssues.filter(i => i.status === '対応中').length,
+        waiting: allIssues.filter(i => i.status === '確認待ち').length,
+        completed: allIssues.filter(i => i.status === '完了').length,
+        onhold: allIssues.filter(i => i.status === '保留').length
+    };
     
-    filteredIssues = allIssues.filter(issue => {
-        const matchStatus = !currentStatusFilter || issue.status === currentStatusFilter;
-        const matchSearch = !searchText || 
-            issue.title.toLowerCase().includes(searchText) ||
-            (issue.description && issue.description.toLowerCase().includes(searchText));
-        
-        return matchStatus && matchSearch;
-    });
-    
-    // ソートを適用
-    applySorting();
-    
-    currentPage = 1;
-    renderIssues();
-    renderPagination();
-    updateStatCardsActiveState();
+    document.getElementById('statTotal').textContent = stats.total;
+    document.getElementById('statPending').textContent = stats.pending;
+    document.getElementById('statProgress').textContent = stats.progress;
+    document.getElementById('statWaiting').textContent = stats.waiting;
+    document.getElementById('statCompleted').textContent = stats.completed;
+    document.getElementById('statOnHold').textContent = stats.onhold;
 }
 
-// ステータスでフィルター（グローバル関数）
-window.filterByStatus = function(status) {
-    currentStatusFilter = status;
-    applyFilters();
-};
-
-// 統計カードのアクティブ状態を更新
-function updateStatCardsActiveState() {
-    const statCards = document.querySelectorAll('.stat-card');
-    statCards.forEach(card => {
-        const filterValue = card.getAttribute('data-filter');
-        if (filterValue === currentStatusFilter) {
-            card.classList.add('active');
+// フィルター適用
+function applyFilters() {
+    let filtered = [...allIssues];
+    
+    if (currentStatusFilter) {
+        filtered = filtered.filter(issue => issue.status === currentStatusFilter);
+    }
+    
+    const searchTerm = searchInput ? searchInput.value.toLowerCase() : '';
+    if (searchTerm) {
+        filtered = filtered.filter(issue => 
+            (issue.title && issue.title.toLowerCase().includes(searchTerm)) ||
+            (issue.description && issue.description.toLowerCase().includes(searchTerm))
+        );
+    }
+    
+    filtered.sort((a, b) => {
+        let aVal = a[currentSortField];
+        let bVal = b[currentSortField];
+        
+        if (currentSortField === 'created_at' || currentSortField === 'due_date') {
+            aVal = aVal ? new Date(aVal).getTime() : 0;
+            bVal = bVal ? new Date(bVal).getTime() : 0;
+        }
+        
+        if (currentSortOrder === 'asc') {
+            return aVal > bVal ? 1 : -1;
         } else {
-            card.classList.remove('active');
+            return aVal < bVal ? 1 : -1;
         }
     });
+    
+    filteredIssues = filtered;
+    currentPage = 1;
+    renderIssues();
 }
 
-// ソート機能（グローバル関数）
-window.sortIssues = function(field) {
-    // 同じフィールドをクリックした場合は昇順/降順を切り替え
+// 検索
+function searchIssues() {
+    applyFilters();
+}
+
+// ステータスフィルター
+function filterByStatus(status) {
+    currentStatusFilter = currentStatusFilter === status ? '' : status;
+    
+    document.querySelectorAll('.stat-card').forEach(card => {
+        card.classList.remove('active');
+    });
+    
+    if (currentStatusFilter) {
+        const activeCard = document.querySelector(`.stat-card[data-filter="${currentStatusFilter}"]`);
+        if (activeCard) activeCard.classList.add('active');
+    }
+    
+    applyFilters();
+}
+
+// ソート
+function sortIssues(field) {
     if (currentSortField === field) {
         currentSortOrder = currentSortOrder === 'asc' ? 'desc' : 'asc';
     } else {
         currentSortField = field;
-        currentSortOrder = 'asc';
+        currentSortOrder = 'desc';
     }
-    
-    applySorting();
-    renderIssues();
-    renderPagination();
+    applyFilters();
 }
 
-// ソートを適用
-function applySorting() {
-    filteredIssues.sort((a, b) => {
-        let aValue = a[currentSortField];
-        let bValue = b[currentSortField];
-        
-        // 優先度のソート順序を定義
-        if (currentSortField === 'priority') {
-            const priorityOrder = { '高': 1, '中': 2, '低': 3 };
-            aValue = priorityOrder[aValue] || 999;
-            bValue = priorityOrder[bValue] || 999;
-        }
-        
-        // ステータスのソート順序を定義
-        if (currentSortField === 'status') {
-            const statusOrder = { '未対応': 1, '対応中': 2, '確認待ち': 3, '完了': 4, '保留': 5 };
-            aValue = statusOrder[aValue] || 999;
-            bValue = statusOrder[bValue] || 999;
-        }
-        
-        // 空の値を最後に
-        if (!aValue && aValue !== 0) aValue = currentSortOrder === 'asc' ? 'zzz' : '';
-        if (!bValue && bValue !== 0) bValue = currentSortOrder === 'asc' ? 'zzz' : '';
-        
-        // 比較
-        if (aValue < bValue) return currentSortOrder === 'asc' ? -1 : 1;
-        if (aValue > bValue) return currentSortOrder === 'asc' ? 1 : -1;
-        return 0;
-    });
+// モーダル：使い方ガイド
+function showGuideModal() {
+    const modal = document.getElementById('guideModal');
+    if (modal) modal.classList.add('show');
 }
 
-// 修正項目の表示（リスト形式）
-function renderIssues() {
-    if (filteredIssues.length === 0) {
-        issuesContainer.innerHTML = `
-            <div class="empty-state">
-                <i class="fas fa-inbox"></i>
-                <p>修正項目がありません</p>
-            </div>
-        `;
-        return;
-    }
-    
-    const startIndex = (currentPage - 1) * itemsPerPage;
-    const endIndex = startIndex + itemsPerPage;
-    const pageIssues = filteredIssues.slice(startIndex, endIndex);
-    
-    issuesContainer.innerHTML = `
-        <table class="issues-table">
-            <thead>
-                <tr>
-                    <th style="width: 60px;">ID</th>
-                    <th class="sortable" onclick="sortIssues('status')">
-                        ステータス <i class="fas fa-sort"></i>
-                    </th>
-                    <th class="sortable" onclick="sortIssues('priority')">
-                        優先度 <i class="fas fa-sort"></i>
-                    </th>
-                    <th class="sortable" onclick="sortIssues('title')">
-                        タイトル / 詳細 <i class="fas fa-sort"></i>
-                    </th>
-                    <th class="sortable" onclick="sortIssues('category')">
-                        カテゴリ <i class="fas fa-sort"></i>
-                    </th>
-                    <th class="sortable" onclick="sortIssues('assignee')">
-                        担当者 <i class="fas fa-sort"></i>
-                    </th>
-                    <th class="sortable" onclick="sortIssues('due_date')">
-                        期限 <i class="fas fa-sort"></i>
-                    </th>
-                    <th class="sortable" onclick="sortIssues('created_at')">
-                        登録日 <i class="fas fa-sort"></i>
-                    </th>
-                    <th class="th-actions">操作</th>
-                </tr>
-            </thead>
-            <tbody>
-                ${pageIssues.map((issue, index) => {
-                    // 全体のインデックスを計算（ページネーション考慮）
-                    const globalIndex = filteredIssues.findIndex(i => i.id === issue.id) + 1;
-                    return `
-                    <tr class="issue-row status-${issue.status.replace(/\s/g, '-')}" onclick="showDetail('${issue.id}')">
-                        <td style="font-weight: 600; color: #64748b;">
-                            #${globalIndex}
-                        </td>
-                        <td onclick="event.stopPropagation();">
-                            <select class="status-select status-${issue.status.replace(/\s/g, '-')}" onchange="changeStatus('${issue.id}', this.value)" data-current="${issue.status}">
-                                <option value="未対応" ${issue.status === '未対応' ? 'selected' : ''}>未対応</option>
-                                <option value="対応中" ${issue.status === '対応中' ? 'selected' : ''}>対応中</option>
-                                <option value="確認待ち" ${issue.status === '確認待ち' ? 'selected' : ''}>確認待ち</option>
-                                <option value="完了" ${issue.status === '完了' ? 'selected' : ''}>完了</option>
-                                <option value="保留" ${issue.status === '保留' ? 'selected' : ''}>保留</option>
-                            </select>
-                        </td>
-                        <td>
-                            <span class="badge badge-priority priority-${issue.priority}">${issue.priority}</span>
-                        </td>
-                        <td class="td-title">
-                            <div class="row-title">
-                                ${escapeHtml(issue.title)}
-                                ${issue.screenshot ? '<i class="fas fa-image" title="画像あり"></i>' : ''}
-                            </div>
-                            ${issue.description ? `
-                                <div class="row-description">${escapeHtml(truncateText(issue.description, 100))}</div>
-                            ` : ''}
-                        </td>
-                        <td>
-                            <span class="badge badge-category">${issue.category}</span>
-                        </td>
-                        <td>${issue.assignee || '<span class="text-muted">未割当</span>'}</td>
-                        <td>
-                            ${issue.due_date ? `
-                                <span class="${isOverdue(issue.due_date) ? 'text-danger' : ''}">${formatDate(issue.due_date)}</span>
-                            ` : '<span class="text-muted">-</span>'}
-                        </td>
-                        <td>${formatDate(issue.created_at)}</td>
-                        <td class="td-actions" onclick="event.stopPropagation();">
-                            <button class="btn-icon" onclick="editIssue('${issue.id}')" title="編集">
-                                <i class="fas fa-edit"></i>
-                            </button>
-                            <button class="btn-icon btn-icon-danger" onclick="deleteIssue('${issue.id}')" title="削除">
-                                <i class="fas fa-trash"></i>
-                            </button>
-                        </td>
-                    </tr>
-                `;
-                }).join('')}
-            </tbody>
-        </table>
-    `;
+function closeGuideModal() {
+    const modal = document.getElementById('guideModal');
+    if (modal) modal.classList.remove('show');
 }
 
-// ページネーション表示
-function renderPagination() {
-    const pagination = document.getElementById('pagination');
-    const totalPages = Math.ceil(filteredIssues.length / itemsPerPage);
-    
-    if (totalPages <= 1) {
-        pagination.innerHTML = '';
-        return;
-    }
-    
-    let html = '';
-    
-    // 前へボタン
-    html += `<button class="page-btn" ${currentPage === 1 ? 'disabled' : ''} onclick="changePage(${currentPage - 1})">
-        <i class="fas fa-chevron-left"></i>
-    </button>`;
-    
-    // ページ番号
-    for (let i = 1; i <= totalPages; i++) {
-        if (i === 1 || i === totalPages || (i >= currentPage - 2 && i <= currentPage + 2)) {
-            html += `<button class="page-btn ${i === currentPage ? 'active' : ''}" onclick="changePage(${i})">${i}</button>`;
-        } else if (i === currentPage - 3 || i === currentPage + 3) {
-            html += `<span class="page-btn" disabled>...</span>`;
-        }
-    }
-    
-    // 次へボタン
-    html += `<button class="page-btn" ${currentPage === totalPages ? 'disabled' : ''} onclick="changePage(${currentPage + 1})">
-        <i class="fas fa-chevron-right"></i>
-    </button>`;
-    
-    pagination.innerHTML = html;
-}
-
-// ページ変更
-function changePage(page) {
-    currentPage = page;
-    renderIssues();
-    renderPagination();
-    window.scrollTo({ top: 0, behavior: 'smooth' });
-}
-
-// 統計情報の更新
-function updateStats() {
-    document.getElementById('statTotal').textContent = allIssues.length;
-    document.getElementById('statPending').textContent = allIssues.filter(i => i.status === '未対応').length;
-    document.getElementById('statProgress').textContent = allIssues.filter(i => i.status === '対応中').length;
-    document.getElementById('statWaiting').textContent = allIssues.filter(i => i.status === '確認待ち').length;
-    document.getElementById('statCompleted').textContent = allIssues.filter(i => i.status === '完了').length;
-    document.getElementById('statOnHold').textContent = allIssues.filter(i => i.status === '保留').length;
-}
-
-// 新規追加モーダルを開く（グローバル関数として定義）
-window.openAddModal = function() {
-    // DOM要素を再取得（念のため）
-    const modal = issueModal || document.getElementById('issueModal');
-    const form = issueForm || document.getElementById('issueForm');
-    const title = modalTitle || document.getElementById('modalTitle');
-    const preview = screenshotPreview || document.getElementById('screenshotPreview');
-    
-    if (!modal) return;
-    
+// モーダル：新規追加
+function openNewIssueModal() {
     editingIssueId = null;
-    if (title) title.textContent = '新規追加';
-    if (form) form.reset();
-    if (preview) {
-        preview.innerHTML = '';
-        preview.classList.remove('show');
-    }
+    document.getElementById('modalTitle').textContent = '新規追加';
+    issueForm.reset();
+    screenshotPreview.innerHTML = '';
+    screenshotPreview.classList.remove('show');
     
     const dropZone = document.getElementById('dropZone');
-    if (dropZone) {
-        dropZone.style.display = 'flex';
-    }
+    if (dropZone) dropZone.style.display = 'flex';
     
-    modal.classList.add('show');
-};
+    issueModal.classList.add('show');
+}
 
-// 編集モーダルを開く（グローバル関数）
+window.openAddModal = openNewIssueModal;
+
+// モーダル：編集
 window.editIssue = async function(id) {
     try {
         const issue = await SupabaseAPI.getById(id);
+        if (!issue) {
+            alert('データの読み込みに失敗しました。');
+            return;
+        }
         
         editingIssueId = id;
-        modalTitle.textContent = '修正項目の編集';
+        document.getElementById('modalTitle').textContent = '編集';
         
-        document.getElementById('issueId').value = issue.id;
-        document.getElementById('issueTitle').value = issue.title;
-        document.getElementById('issueStatus').value = issue.status;
-        document.getElementById('issuePriority').value = issue.priority;
-        document.getElementById('issueCategory').value = issue.category;
+        document.getElementById('issueTitle').value = issue.title || '';
+        document.getElementById('issueStatus').value = issue.status || '未対応';
+        document.getElementById('issuePriority').value = issue.priority || '中';
+        document.getElementById('issueCategory').value = issue.category || 'デザイン';
         document.getElementById('issueAssignee').value = issue.assignee || '';
         document.getElementById('issuePageUrl').value = issue.page_url || '';
         
         // due_dateをYYYY-MM-DD形式に変換
         if (issue.due_date) {
-            const dueDate = new Date(issue.due_date);
-            const year = dueDate.getFullYear();
-            const month = String(dueDate.getMonth() + 1).padStart(2, '0');
-            const day = String(dueDate.getDate()).padStart(2, '0');
-            document.getElementById('issueDueDate').value = `${year}-${month}-${day}`;
+            try {
+                const date = new Date(issue.due_date);
+                const year = date.getFullYear();
+                const month = String(date.getMonth() + 1).padStart(2, '0');
+                const day = String(date.getDate()).padStart(2, '0');
+                document.getElementById('issueDueDate').value = `${year}-${month}-${day}`;
+            } catch (e) {
+                document.getElementById('issueDueDate').value = '';
+            }
         } else {
             document.getElementById('issueDueDate').value = '';
         }
         
         document.getElementById('issueDescription').value = issue.description || '';
         
-        const dropZone = document.getElementById('dropZone');
-        
         if (issue.screenshot) {
-            if (dropZone) dropZone.style.display = 'none';
-            screenshotPreview.innerHTML = `
-                <img src="${issue.screenshot}" alt="プレビュー">
-                <button type="button" class="remove-screenshot" onclick="removeScreenshot()">×</button>
-            `;
-            screenshotPreview.classList.add('show');
+            displayImagePreview(issue.screenshot);
         } else {
-            if (dropZone) dropZone.style.display = 'flex';
             screenshotPreview.innerHTML = '';
             screenshotPreview.classList.remove('show');
         }
@@ -414,36 +249,47 @@ window.editIssue = async function(id) {
         console.error('データの読み込みに失敗しました:', error);
         alert('データの読み込みに失敗しました。');
     }
-}
+};
 
-// 詳細表示（グローバル関数）
+// モーダル：詳細表示
 window.showDetail = async function(id) {
     try {
         const issue = await SupabaseAPI.getById(id);
-        
-        // IDを計算
-        const globalIndex = allIssues.findIndex(i => i.id === issue.id) + 1;
+        if (!issue) {
+            alert('データの読み込みに失敗しました。');
+            return;
+        }
         
         const detailContent = document.getElementById('detailContent');
+        const globalIndex = allIssues.findIndex(i => i.id === issue.id) + 1;
+        
         detailContent.innerHTML = `
-            <div class="detail-row">
-                <div class="detail-label">ID</div>
-                <div class="detail-value" style="font-weight: 600; color: #64748b; font-size: 18px;">#${globalIndex}</div>
+            <div class="detail-row" style="background: #f8fafc; border-bottom: 2px solid #e2e8f0;">
+                <div class="detail-label" style="font-weight: 700; font-size: 18px; color: #1e293b;">ID</div>
+                <div class="detail-value" style="font-weight: 700; font-size: 18px; color: #2563eb;">#${globalIndex}</div>
             </div>
             
             <div class="detail-row">
                 <div class="detail-label">タイトル</div>
-                <div class="detail-value">${escapeHtml(issue.title)}</div>
+                <div class="detail-value" style="font-weight: 600; color: #1e293b;">${escapeHtml(issue.title)}</div>
             </div>
             
             <div class="detail-row">
-                <div class="detail-label">ステータス / 優先度 / カテゴリ</div>
-                <div class="detail-value">
-                    <span class="badge badge-status ${issue.status}">${issue.status}</span>
-                    <span class="badge badge-priority ${issue.priority}">優先度: ${issue.priority}</span>
-                    <span class="badge badge-category">${issue.category}</span>
-                </div>
+                <div class="detail-label">ステータス</div>
+                <div class="detail-value"><span class="status-badge status-${issue.status}">${issue.status}</span></div>
             </div>
+            
+            <div class="detail-row">
+                <div class="detail-label">優先度</div>
+                <div class="detail-value"><span class="priority-badge priority-${issue.priority}">${issue.priority}</span></div>
+            </div>
+            
+            ${issue.category ? `
+                <div class="detail-row">
+                    <div class="detail-label">カテゴリ</div>
+                    <div class="detail-value">${escapeHtml(issue.category)}</div>
+                </div>
+            ` : ''}
             
             ${issue.assignee ? `
                 <div class="detail-row">
@@ -502,7 +348,6 @@ let isSubmitting = false;
 async function handleSubmit(e) {
     e.preventDefault();
     
-    // 多重送信を防ぐ
     if (isSubmitting) {
         console.log('⚠️ すでに送信中です');
         return;
@@ -517,17 +362,15 @@ async function handleSubmit(e) {
         category: document.getElementById('issueCategory').value,
         assignee: document.getElementById('issueAssignee').value,
         page_url: document.getElementById('issuePageUrl').value,
-        due_date: document.getElementById('issueDueDate').value || null, // 空の場合はnull
+        due_date: document.getElementById('issueDueDate').value || null,
         description: document.getElementById('issueDescription').value,
         screenshot: ''
     };
     
-    // スクリーンショットの取得
     const previewImg = screenshotPreview.querySelector('img');
     if (previewImg) {
         formData.screenshot = previewImg.src;
         
-        // Base64データのサイズチェック（約2MB）
         const sizeInBytes = Math.ceil((formData.screenshot.length * 3) / 4);
         const sizeInMB = sizeInBytes / (1024 * 1024);
         
@@ -542,10 +385,8 @@ async function handleSubmit(e) {
     
     try {
         if (editingIssueId) {
-            // 更新
             await SupabaseAPI.update(editingIssueId, formData);
         } else {
-            // 新規作成
             await SupabaseAPI.create(formData);
         }
         
@@ -556,12 +397,11 @@ async function handleSubmit(e) {
         console.error('保存エラー:', error);
         alert('保存に失敗しました。もう一度お試しください。');
     } finally {
-        // 送信中フラグをリセット
         isSubmitting = false;
     }
 }
 
-// 削除処理（グローバル関数）
+// 削除処理
 window.deleteIssue = async function(id) {
     if (!confirm('この修正項目を削除してもよろしいですか?')) {
         return;
@@ -577,10 +417,9 @@ window.deleteIssue = async function(id) {
     }
 };
 
-// ステータス変更（グローバル関数）
+// ステータス変更
 window.changeStatus = async function(id, newStatus) {
     try {
-        // ステータスのみを更新
         await SupabaseAPI.update(id, { status: newStatus });
         await loadIssues();
         showSuccess(`ステータスを「${newStatus}」に変更しました`);
@@ -590,7 +429,6 @@ window.changeStatus = async function(id, newStatus) {
         await loadIssues();
     }
 };
-
 // 画像アップロード処理
 function handleImageUpload(e) {
     const file = e.target.files[0];
@@ -598,15 +436,15 @@ function handleImageUpload(e) {
     processImageFile(file);
 }
 
-// 画像ファイルの処理（共通関数）
+window.handleImageUpload = handleImageUpload;
+
+// 画像処理（ドラッグ&ドロップ、クリップボード用）
 function processImageFile(file) {
-    // 画像ファイルかチェック
     if (!file.type.startsWith('image/')) {
         alert('画像ファイルを選択してください。');
         return;
     }
     
-    // 画像を読み込んでリサイズ＆WebP変換
     const reader = new FileReader();
     reader.onload = function(event) {
         resizeAndConvertImage(event.target.result);
@@ -614,25 +452,22 @@ function processImageFile(file) {
     reader.readAsDataURL(file);
 }
 
-// 画像をリサイズしてWebPに変換
+// 画像リサイズ＆WebP変換
 function resizeAndConvertImage(dataUrl) {
     const img = new Image();
     img.onload = function() {
-        // 最大幅・高さを設定（これより大きい場合はリサイズ）
         const maxWidth = 2560;
         const maxHeight = 2560;
         
         let width = img.width;
         let height = img.height;
         
-        // アスペクト比を維持しながらリサイズ
         if (width > maxWidth || height > maxHeight) {
             const ratio = Math.min(maxWidth / width, maxHeight / height);
             width = Math.floor(width * ratio);
             height = Math.floor(height * ratio);
         }
         
-        // Canvasで画像を描画
         const canvas = document.createElement('canvas');
         canvas.width = width;
         canvas.height = height;
@@ -640,33 +475,26 @@ function resizeAndConvertImage(dataUrl) {
         const ctx = canvas.getContext('2d');
         ctx.drawImage(img, 0, 0, width, height);
         
-        // WebPに変換（品質90%）
-        // WebPがサポートされていない場合はJPEGにフォールバック
         let outputFormat = 'image/webp';
         let quality = 0.9;
         
-        // WebPをサポートしているかチェック
         const webpDataUrl = canvas.toDataURL('image/webp', quality);
         if (webpDataUrl.indexOf('data:image/webp') !== 0) {
-            // WebP非対応の場合はJPEGを使用
             outputFormat = 'image/jpeg';
         }
         
         const finalDataUrl = canvas.toDataURL(outputFormat, quality);
         
-        // サイズを確認
         const sizeInBytes = Math.ceil((finalDataUrl.length * 3) / 4);
         const sizeInMB = sizeInBytes / (1024 * 1024);
         
         console.log(`画像変換完了: ${img.width}x${img.height} → ${width}x${height}, サイズ: ${sizeInMB.toFixed(2)}MB`);
         
-        // サイズが大きすぎる場合は警告
         if (sizeInMB > 5) {
-            alert(`画像サイズが大きすぎます（${sizeInMB.toFixed(2)}MB）。\n5MB以下の画像を使用してください。\n\n画像をもっと小さくトリミングするか、範囲を狭くしてください。`);
+            alert(`画像サイズが大きすぎます（${sizeInMB.toFixed(2)}MB）。\n5MB以下の画像を使用してください。`);
             return;
         }
         
-        // プレビュー表示
         displayImagePreview(finalDataUrl);
     };
     
@@ -691,26 +519,23 @@ function displayImagePreview(dataUrl) {
     screenshotPreview.classList.add('show');
 }
 
-// ドラッグ&ドロップ機能の設定
+// ドラッグ&ドロップ設定
 function setupDragAndDrop() {
     const dropZone = document.getElementById('dropZone');
     if (!dropZone) return;
     
-    // ドラッグオーバー
     dropZone.addEventListener('dragover', (e) => {
         e.preventDefault();
         e.stopPropagation();
         dropZone.classList.add('drag-over');
     });
     
-    // ドラッグ離脱
     dropZone.addEventListener('dragleave', (e) => {
         e.preventDefault();
         e.stopPropagation();
         dropZone.classList.remove('drag-over');
     });
     
-    // ドロップ
     dropZone.addEventListener('drop', (e) => {
         e.preventDefault();
         e.stopPropagation();
@@ -722,7 +547,6 @@ function setupDragAndDrop() {
         }
     });
     
-    // ファイル選択ボタン
     const selectFileBtn = document.getElementById('selectFileBtn');
     if (selectFileBtn) {
         selectFileBtn.addEventListener('click', () => {
@@ -731,9 +555,8 @@ function setupDragAndDrop() {
     }
 }
 
-// クリップボードからのペースト機能
+// クリップボードペースト
 function setupClipboardPaste() {
-    // モーダル全体でペーストイベントをキャッチ
     const issueModal = document.getElementById('issueModal');
     if (!issueModal) return;
     
@@ -743,7 +566,6 @@ function setupClipboardPaste() {
         for (let i = 0; i < items.length; i++) {
             const item = items[i];
             
-            // 画像データの場合
             if (item.type.indexOf('image') !== -1) {
                 e.preventDefault();
                 const file = item.getAsFile();
@@ -754,7 +576,7 @@ function setupClipboardPaste() {
     });
 }
 
-// スクリーンショット削除（グローバル関数）
+// スクリーンショット削除
 window.removeScreenshot = function() {
     const dropZone = document.getElementById('dropZone');
     if (dropZone) {
@@ -766,7 +588,7 @@ window.removeScreenshot = function() {
     screenshotInput.value = '';
 }
 
-// 画像モーダル表示（グローバル関数）
+// 画像モーダル表示
 window.showImageModal = function(src) {
     const modal = document.createElement('div');
     modal.className = 'modal show';
@@ -781,7 +603,6 @@ window.showImageModal = function(src) {
 }
 
 // モーダルを閉じる
-// モーダルを閉じる（グローバル関数）
 window.closeModals = function() {
     const modal1 = issueModal || document.getElementById('issueModal');
     const modal2 = detailModal || document.getElementById('detailModal');
@@ -790,76 +611,134 @@ window.closeModals = function() {
     if (modal2) modal2.classList.remove('show');
 };
 
-// ユーティリティ関数
-function escapeHtml(text) {
-    const div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML;
-}
+// ========================================
+// 4. データ表示とレンダリング
+// ========================================
 
-function truncateText(text, maxLength) {
-    if (!text) return '';
-    if (text.length <= maxLength) return text;
-    return text.substring(0, maxLength) + '...';
-}
-
-function formatDate(dateString) {
-    if (!dateString) return '';
-    const date = new Date(dateString);
-    return date.toLocaleDateString('ja-JP');
-}
-
-function formatDateTime(timestamp) {
-    if (!timestamp) return '';
-    const date = new Date(timestamp);
-    return date.toLocaleString('ja-JP');
-}
-
-function isOverdue(dateString) {
-    if (!dateString) return false;
-    const dueDate = new Date(dateString);
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    return dueDate < today;
-}
-
-function debounce(func, wait) {
-    let timeout;
-    return function executedFunction(...args) {
-        const later = () => {
-            clearTimeout(timeout);
-            func(...args);
-        };
-        clearTimeout(timeout);
-        timeout = setTimeout(later, wait);
-    };
-}
-
-function showLoading() {
-    issuesContainer.innerHTML = '<div class="loading">読み込み中...</div>';
-}
-
-function showError(message) {
-    issuesContainer.innerHTML = `<div class="empty-state" style="grid-column: 1/-1;"><i class="fas fa-exclamation-triangle"></i><p>${message}</p></div>`;
-}
-
-function showSuccess(message) {
-    // 簡易的な成功メッセージ表示
-    const toast = document.createElement('div');
-    toast.style.cssText = 'position: fixed; top: 20px; right: 20px; background: #10b981; color: white; padding: 16px 24px; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); z-index: 3000; animation: slideInRight 0.3s ease;';
-    toast.innerHTML = `<i class="fas fa-check-circle"></i> ${message}`;
-    document.body.appendChild(toast);
+function renderIssues() {
+    const container = document.getElementById('issuesContainer');
     
-    setTimeout(() => {
-        toast.style.animation = 'slideOutRight 0.3s ease';
-        setTimeout(() => toast.remove(), 300);
-    }, 2000);
+    if (filteredIssues.length === 0) {
+        container.innerHTML = `
+            <div class="no-issues">
+                <p>📋 修正項目がありません</p>
+                <p class="text-muted">右上の「新規追加」ボタンから項目を追加できます</p>
+            </div>
+        `;
+        document.getElementById('pagination').innerHTML = '';
+        return;
+    }
+
+    const start = (currentPage - 1) * itemsPerPage;
+    const end = start + itemsPerPage;
+    const paginatedIssues = filteredIssues.slice(start, end);
+    
+    container.innerHTML = `
+        <table class="issues-table">
+            <thead>
+                <tr>
+                    <th onclick="sortIssues('index')">ID</th>
+                    <th onclick="sortIssues('status')">ステータス ▼</th>
+                    <th onclick="sortIssues('priority')">優先度 ▼</th>
+                    <th onclick="sortIssues('title')">タイトル・詳細 ▼</th>
+                    <th onclick="sortIssues('category')">カテゴリ ▼</th>
+                    <th onclick="sortIssues('assignee')">担当者 ▼</th>
+                    <th onclick="sortIssues('due_date')">期限 ▼</th>
+                    <th onclick="sortIssues('created_at')">登録日 ▼</th>
+                    <th class="actions-column">操作</th>
+                </tr>
+            </thead>
+            <tbody>
+                ${paginatedIssues.map((issue, index) => {
+                    const globalIndex = allIssues.findIndex(i => i.id === issue.id) + 1;
+                    return `
+                    <tr>
+                        <td class="id-column">#${globalIndex}</td>
+                        <td class="status-column">
+                            <select class="status-select status-${issue.status}" onchange="changeStatus('${issue.id}', this.value)">
+                                <option value="未対応" ${issue.status === '未対応' ? 'selected' : ''}>未対応</option>
+                                <option value="対応中" ${issue.status === '対応中' ? 'selected' : ''}>対応中</option>
+                                <option value="確認待ち" ${issue.status === '確認待ち' ? 'selected' : ''}>確認待ち</option>
+                                <option value="完了" ${issue.status === '完了' ? 'selected' : ''}>完了</option>
+                                <option value="保留" ${issue.status === '保留' ? 'selected' : ''}>保留</option>
+                            </select>
+                        </td>
+                        <td><span class="priority-badge priority-${issue.priority}">${issue.priority}</span></td>
+                        <td class="title-column">
+                            <div class="title-wrapper">
+                                <strong>${escapeHtml(issue.title)}</strong>
+                                ${issue.screenshot ? '<i class="fas fa-image screenshot-icon" title="画像あり"></i>' : ''}
+                            </div>
+                            ${issue.description ? `<div class="description-preview">${escapeHtml(truncateText(issue.description, 60))}</div>` : ''}
+                        </td>
+                        <td>${escapeHtml(issue.category)}</td>
+                        <td>${escapeHtml(issue.assignee)}</td>
+                        <td class="${isOverdue(issue.due_date) ? 'overdue-date' : ''}">${formatDate(issue.due_date)}</td>
+                        <td>${formatDate(issue.created_at)}</td>
+                        <td class="actions-column">
+                            <button class="btn-icon" onclick="showDetail('${issue.id}')" title="詳細表示">
+                                <i class="fas fa-eye"></i>
+                            </button>
+                            <button class="btn-icon" onclick="editIssue('${issue.id}')" title="編集">
+                                <i class="fas fa-edit"></i>
+                            </button>
+                            <button class="btn-icon btn-icon-delete" onclick="if(confirm('この項目を削除しますか？')) deleteIssue('${issue.id}')" title="削除">
+                                <i class="fas fa-trash"></i>
+                            </button>
+                        </td>
+                    </tr>
+                `;
+                }).join('')}
+            </tbody>
+        </table>
+    `;
+    
+    renderPagination();
 }
 
-// CSVエクスポート機能（グローバル関数）
+function renderPagination() {
+    const totalPages = Math.ceil(filteredIssues.length / itemsPerPage);
+    const pagination = document.getElementById('pagination');
+    
+    if (totalPages <= 1) {
+        pagination.innerHTML = '';
+        return;
+    }
+    
+    let html = '<div class="pagination-container">';
+    
+    if (currentPage > 1) {
+        html += `<button class="pagination-btn" onclick="goToPage(${currentPage - 1})">前へ</button>`;
+    }
+    
+    for (let i = 1; i <= totalPages; i++) {
+        if (i === 1 || i === totalPages || (i >= currentPage - 2 && i <= currentPage + 2)) {
+            html += `<button class="pagination-btn ${i === currentPage ? 'active' : ''}" onclick="goToPage(${i})">${i}</button>`;
+        } else if (i === currentPage - 3 || i === currentPage + 3) {
+            html += `<span class="pagination-dots">...</span>`;
+        }
+    }
+    
+    if (currentPage < totalPages) {
+        html += `<button class="pagination-btn" onclick="goToPage(${currentPage + 1})">次へ</button>`;
+    }
+    
+    html += '</div>';
+    pagination.innerHTML = html;
+}
+
+function goToPage(page) {
+    currentPage = page;
+    renderIssues();
+    window.scrollTo({top: 0, behavior: 'smooth'});
+}
+
+// ========================================
+// 5. CSV エクスポート機能
+// ========================================
+
 window.exportToCSV = function() {
-    // エクスポートするデータ（現在のフィルター済みデータ）
-    const dataToExport = filteredIssues.map((issue, index) => {
+    const dataToExport = filteredIssues.map((issue) => {
         const globalIndex = allIssues.findIndex(i => i.id === issue.id) + 1;
         return {
             ID: `#${globalIndex}`,
@@ -880,16 +759,13 @@ window.exportToCSV = function() {
         return;
     }
     
-    // CSVヘッダー
     const headers = ['ID', 'ステータス', '優先度', 'タイトル', '詳細説明', 'カテゴリ', '担当者', '対象ページURL', '期限', '登録日'];
     
-    // CSVデータを作成
     const csvContent = [
         headers.join(','),
         ...dataToExport.map(row => 
             headers.map(header => {
                 const value = row[header] || '';
-                // カンマや改行を含む場合はダブルクォートで囲む
                 const escaped = String(value).replace(/"/g, '""');
                 return escaped.includes(',') || escaped.includes('\n') || escaped.includes('"') 
                     ? `"${escaped}"` 
@@ -898,15 +774,12 @@ window.exportToCSV = function() {
         )
     ].join('\n');
     
-    // BOM付きUTF-8でエンコード（Excel対応）
     const bom = '\uFEFF';
     const blob = new Blob([bom + csvContent], { type: 'text/csv;charset=utf-8;' });
     
-    // ファイル名（日時付き）
     const now = new Date();
     const filename = `修正管理表_${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}_${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}.csv`;
     
-    // ダウンロード
     const link = document.createElement('a');
     link.href = URL.createObjectURL(blob);
     link.download = filename;
@@ -915,32 +788,95 @@ window.exportToCSV = function() {
     showSuccess(`CSVファイルをエクスポートしました（${dataToExport.length}件）`);
 }
 
-// 使い方・注意事項モーダルの表示（グローバル関数）
-window.showGuideModal = function() {
-    const guideModal = document.getElementById('guideModal');
-    if (guideModal) {
-        guideModal.classList.add('show');
+// ========================================
+// 6. ヘルパー関数
+// ========================================
+
+function escapeHtml(text) {
+    if (!text) return '';
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+function truncateText(text, maxLength) {
+    if (!text || text.length <= maxLength) return text;
+    return text.substring(0, maxLength) + '...';
+}
+
+function formatDate(dateString) {
+    if (!dateString) return '-';
+    try {
+        const date = new Date(dateString);
+        const year = date.getFullYear();
+        const month = String(date.getMonth() + 1).padStart(2, '0');
+        const day = String(date.getDate()).padStart(2, '0');
+        return `${year}/${month}/${day}`;
+    } catch (e) {
+        return '-';
     }
 }
 
-// 使い方・注意事項モーダルを閉じる（グローバル関数）
-window.closeGuideModal = function() {
-    const guideModal = document.getElementById('guideModal');
-    if (guideModal) {
-        guideModal.classList.remove('show');
-    }
+function formatDateTime(timestamp) {
+    if (!timestamp) return '';
+    const date = new Date(timestamp);
+    return date.toLocaleString('ja-JP');
 }
 
-// アニメーション用CSS追加
-const style = document.createElement('style');
-style.textContent = `
-    @keyframes slideInRight {
-        from { transform: translateX(400px); opacity: 0; }
-        to { transform: translateX(0); opacity: 1; }
-    }
-    @keyframes slideOutRight {
-        from { transform: translateX(0); opacity: 1; }
-        to { transform: translateX(400px); opacity: 0; }
-    }
-`;
-document.head.appendChild(style);
+function isOverdue(dueDateString) {
+    if (!dueDateString) return false;
+    const dueDate = new Date(dueDateString);
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    return dueDate < today;
+}
+
+function showSuccess(message) {
+    alert(message);
+}
+
+function showError(message) {
+    alert(message);
+}
+
+function showLoading() {
+    issuesContainer.innerHTML = '<div class="loading">読み込み中...</div>';
+}
+
+function debounce(func, wait) {
+    let timeout;
+    return function executedFunction(...args) {
+        const later = () => {
+            clearTimeout(timeout);
+            func(...args);
+        };
+        clearTimeout(timeout);
+        timeout = setTimeout(later, wait);
+    };
+}
+
+// ========================================
+// 7. 初期化（グローバル公開）
+// ========================================
+
+console.log('🔵 app.js loaded');
+window.loadIssues = loadIssues;
+window.openNewIssueModal = openNewIssueModal;
+window.closeModal = closeModals;
+window.handleSubmit = handleSubmit;
+window.removeScreenshot = removeScreenshot;
+window.changeStatus = changeStatus;
+window.deleteIssue = deleteIssue;
+window.editIssue = editIssue;
+window.showDetail = showDetail;
+window.searchIssues = searchIssues;
+window.filterByStatus = filterByStatus;
+window.sortIssues = sortIssues;
+window.processImageFile = processImageFile;
+window.handleImageUpload = handleImageUpload;
+window.goToPage = goToPage;
+window.exportToCSV = exportToCSV;
+window.closeModals = closeModals;
+window.showGuideModal = showGuideModal;
+window.closeGuideModal = closeGuideModal;
+window.initializeApp = initializeApp;
